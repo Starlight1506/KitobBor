@@ -29,5 +29,5 @@ Loyihani o'z serveringizda yoki lokal kompyuteringizda (masalan, Kali Linux) ish
 
 ### 1. Repozitoriyni yuklab olish
 ```bash
-git clone [https://github.com/username/kitobbor.git](https://github.com/username/kitobbor.git)
-cd kitobbor
+git clone [https://github.com/username/KitobBor.git](https://github.com/username/KitobBor.git)
+cd KitobBor
