@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KitobBor — Aqlli Kutubxona Tizimi</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="bg-white text-slate-800 min-h-screen flex flex-col">
+
+  <!-- ==================== LOGIN PANEL ==================== -->
+  <div id="loginView" class="min-h-screen flex items-center justify-center bg-slate-50 px-4 py-8">
+    <div class="w-full max-w-md bg-white rounded-3xl shadow-sm border border-slate-200 p-8">
+      <div class="text-center mb-6">
+        <div class="w-14 h-14 mx-auto rounded-2xl bg-blue-600 text-white flex items-center justify-center text-3xl shadow-sm mb-3">
+          📚
+        </div>
+        <h1 class="text-2xl font-bold text-slate-900">KitobBor tizimiga kirish</h1>
+        <p class="text-sm text-slate-500 mt-1">Talaba yoki Kutubxonachi sifatida kiring</p>
+      </div>
+
+      <form id="loginForm" class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Login</label>
+          <input id="loginUsername" required type="text" placeholder="user yoki admin" class="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Parol</label>
+          <input id="loginPassword" required type="password" placeholder="••••••••" class="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+        </div>
+
+        <p id="loginError" class="hidden text-xs font-medium text-rose-600 bg-rose-50 border border-rose-200 px-3 py-2 rounded-xl">
+          Login yoki parol noto'g'ri!
+        </p>
+
+        <button type="submit" class="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition shadow-sm">
+          Kirish
+        </button>
+      </form>
+
+      <!-- Ajratuvchi chiziq -->
+      <div class="flex items-center gap-3 my-5">
+        <div class="flex-1 h-px bg-slate-200"></div>
+        <span class="text-xs font-medium text-slate-400">yoki</span>
+        <div class="flex-1 h-px bg-slate-200"></div>
+      </div>
+
+      <!-- Mehmon uchun parolsiz asosiy tugma -->
+      <button onclick="enterAsGuest()" class="w-full py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-sm font-semibold transition flex items-center justify-center gap-2 border border-slate-200">
+        <span>👤</span>
+        <span>Mehmon sifatida kirish (Parolsiz)</span>
+      </button>
+
+      <!-- Tezkor demo tugmalar (Talaba / Admin) -->
+      <div class="mt-5 pt-4 border-t border-slate-100">
+        <p class="text-xs text-slate-400 text-center mb-2.5">Tezkor test uchun:</p>
+        <div class="grid grid-cols-2 gap-2">
+          <button onclick="quickLogin('user')" class="py-1.5 px-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold transition">
+            🎓 Talaba (Demo)
+          </button>
+          <button onclick="quickLogin('admin')" class="py-1.5 px-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-semibold transition">
+            🔑 Admin (Demo)
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== ASOSIY ILOVA ==================== -->
+  <div id="appView" class="hidden min-h-screen flex flex-col">
+    <!-- Header -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-30">
+      <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-2.5 cursor-pointer" onclick="switchTab('catalog')">
+          <div class="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center text-xl shadow-sm">
+            📚
+          </div>
+          <div>
+            <h1 class="text-lg font-bold tracking-tight text-slate-900 leading-none">KitobBor</h1>
+            <p class="text-xs text-slate-500 mt-0.5">Aqlli Kutubxona Tizimi</p>
+          </div>
+        </div>
+
+        <!-- Navigatsiya -->
+        <nav class="flex flex-wrap items-center bg-slate-100 p-1 rounded-xl gap-1">
+          <button id="tabCatalog" onclick="switchTab('catalog')" class="tab-btn active px-3.5 py-2 rounded-lg text-sm font-medium transition">
+            Katalog
+          </button>
+          <button id="tabReserved" onclick="switchTab('reserved')" class="tab-btn px-3.5 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1.5">
+            Bronlarim
+            <span id="reservedCount" class="px-1.5 py-0.5 text-xs rounded-full bg-blue-600 text-white">0</span>
+          </button>
+          <button id="tabLibrary" onclick="switchTab('library')" class="tab-btn px-3.5 py-2 rounded-lg text-sm font-medium transition">
+            Kutubxona
+          </button>
+          <button id="tabAdmin" onclick="switchTab('admin')" class="tab-btn px-3.5 py-2 rounded-lg text-sm font-medium transition">
+            Admin Panel
+          </button>
+        </nav>
+
+        <!-- Profil va Chiqish -->
+        <div class="flex items-center gap-3 pl-3 border-l border-slate-200">
+          <div class="text-right">
+            <p id="userDisplayName" class="text-sm font-semibold text-slate-800">-</p>
+            <p id="userRoleBadge" class="text-xs text-slate-500">-</p>
+          </div>
+          <button onclick="logout()" class="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-semibold transition">
+            Chiqish
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-6xl w-full mx-auto px-4 py-6 flex-1">
+
+      <!-- 1. KATALOG VA BRONLAR -->
+      <div id="catalogSection">
+        <section class="bg-slate-50 p-4 rounded-2xl border border-slate-200 mb-6">
+          <div class="flex flex-col md:flex-row gap-3">
+            <div class="relative flex-1">
+              <input id="searchInput" type="text" placeholder="Kitob nomi, muallif yoki tokcha bo'yicha qidiring..." class="w-full pl-10 pr-4 py-2.5 bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm transition" />
+              <span class="absolute left-3.5 top-2.5 text-slate-400">🔍</span>
+            </div>
+            <select id="statusFilter" onchange="renderBooks()" class="px-3.5 py-2.5 bg-white rounded-xl border border-slate-300 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="all">Barcha holatlar</option>
+              <option value="available">Faqat mavjudlari</option>
+              <option value="busy">Band qilinganlar</option>
+            </select>
+          </div>
+          <div id="categoryChips" class="flex flex-wrap gap-2 mt-3"></div>
+        </section>
+
+        <section id="booksGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5"></section>
+
+        <div id="emptyState" class="hidden text-center py-16 bg-slate-50 rounded-2xl border border-dashed border-slate-300">
+          <p class="text-4xl mb-2">📭</p>
+          <p class="text-slate-700 font-semibold">Kitob topilmadi</p>
+          <p class="text-sm text-slate-500 mt-1">Qidiruv so'zini yoki filtrlarni o'zgartirib ko'ring.</p>
+        </div>
+      </div>
+
+      <!-- 2. KUTUBXONA HAQIDA MA'LUMOTLAR -->
+      <div id="librarySection" class="hidden space-y-6">
+        <div class="bg-slate-50 border border-slate-200 rounded-2xl p-6">
+          <h2 class="text-xl font-bold text-slate-900">🏛️ Universitet Aqlli Kutubxonasi</h2>
+          <p class="text-sm text-slate-600 mt-2 leading-relaxed">
+            KitobBor tizimi orqali siz kutubxona fondidagi barcha darslik va badiiy adabiyotlarni masofadan tekshirishingiz, aniq javon manzilini ko'rishingiz va NFC talaba kartangiz orqali tezkor qabul qilib olishingiz mumkin.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="p-5 rounded-2xl bg-white border border-slate-200">
+            <p class="text-sm font-bold text-slate-900 mb-2">🕒 Ish vaqti</p>
+            <p class="text-sm text-slate-600">Dushanba – Juma: 08:30 – 20:00</p>
+            <p class="text-sm text-slate-600">Shanba: 09:00 – 17:00</p>
+            <p class="text-sm text-rose-500 mt-1">Yakshanba: Dam olish kuni</p>
+          </div>
+          <div class="p-5 rounded-2xl bg-white border border-slate-200">
+            <p class="text-sm font-bold text-slate-900 mb-2">📋 Bron qilish qoidalari</p>
+            <p class="text-sm text-slate-600">• Kitob masofadan <strong>2 soatga</strong> band qilinadi.</p>
+            <p class="text-sm text-slate-600">• Olib ketish uchun NFC karta shart.</p>
+            <p class="text-sm text-slate-600">• Foydalanish muddati: 14 kun.</p>
+          </div>
+          <div class="p-5 rounded-2xl bg-white border border-slate-200">
+            <p class="text-sm font-bold text-slate-900 mb-2">📍 Manzil va Aloqa</p>
+            <p class="text-sm text-slate-600">Bosh bino, 2-qavat, 1- va 2-o'quv zallari</p>
+            <p class="text-sm text-slate-600 mt-1">Tel: +998 (71) 200-00-00</p>
+            <p class="text-sm text-blue-600">library@kitobbor.uz</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. ADMIN PANEL -->
+      <div id="adminSection" class="hidden space-y-6">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div class="p-5 rounded-2xl bg-slate-50 border border-slate-200">
+            <p class="text-xs font-medium text-slate-500 uppercase">Jami kitoblar</p>
+            <p id="statTotal" class="text-3xl font-bold text-slate-900 mt-1">0</p>
+          </div>
+          <div class="p-5 rounded-2xl bg-emerald-50 border border-emerald-200">
+            <p class="text-xs font-medium text-emerald-700 uppercase">Mavjud kitoblar</p>
+            <p id="statAvailable" class="text-3xl font-bold text-emerald-800 mt-1">0</p>
+          </div>
+          <div class="p-5 rounded-2xl bg-blue-50 border border-blue-200">
+            <p class="text-xs font-medium text-blue-700 uppercase">Aktiv bronlar</p>
+            <p id="statReserved" class="text-3xl font-bold text-blue-800 mt-1">0</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            <h2 class="text-base font-bold text-slate-900 mb-4">➕ Yangi kitob qo'shish</h2>
+            <form id="addBookForm" class="space-y-3.5">
+              <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Kitob nomi</label>
+                <input id="newTitle" required type="text" placeholder="Operating System Concepts" class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-medium text-slate-600 mb-1">Muallif</label>
+                  <input id="newAuthor" required type="text" placeholder="Abraham Silberschatz" class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-600 mb-1">Kategoriya</label>
+                  <input id="newCategory" required type="text" placeholder="IT / Dasturlash" class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+              </div>
+              <div class="grid grid-cols-3 gap-3">
+                <div>
+                  <label class="block text-xs font-medium text-slate-600 mb-1">Zal</label>
+                  <input id="newHall" required type="text" placeholder="1" class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-600 mb-1">Javon</label>
+                  <input id="newRack" required type="text" placeholder="A" class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-600 mb-1">Tokcha</label>
+                  <input id="newShelf" required type="text" placeholder="3" class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+              </div>
+              <button type="submit" class="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition">
+                Bazaga qo'shish
+              </button>
+            </form>
+          </div>
+
+          <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
+            <h2 class="text-base font-bold text-slate-900 mb-4">📡 NFC & Bronlar Jurnali</h2>
+            <div id="adminLogs" class="space-y-2.5 flex-1 overflow-y-auto max-h-80 text-sm"></div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+
+    <footer class="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-400">
+      KitobBor v1.2 (RBAC + Guest Mode) • FastAPI + PostgreSQL + Redis + Arduino RFID-RC522
+    </footer>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="fixed bottom-5 right-5 transform translate-y-20 opacity-0 transition-all duration-300 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-lg text-sm font-medium"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

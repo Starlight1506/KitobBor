@@ -1,0 +1,35 @@
+.tab-btn {
+  color: #64748b;
+}
+
+.tab-btn.active {
+  background-color: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.chip-btn {
+  background-color: #ffffff;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+}
+
+.chip-btn.active {
+  background-color: #0f172a;
+  color: #ffffff;
+  border-color: #0f172a;
+}
+
+.book-card {
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.book-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.08);
+}
+
+#toast.show {
+  transform: translateY(0);
+  opacity: 1;
+}
