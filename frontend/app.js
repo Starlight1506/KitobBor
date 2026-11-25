@@ -1,34 +1,91 @@
-// ================= AKKAUNTLAR VA KONFIGURATSIYA =================
-const ACCOUNTS = {
-  user:  { password: "1234", role: "user",  name: "Talaba #1042", badge: "NFC: 04 1A 2B 3C" },
-  admin: { password: "admin123", role: "admin", name: "Kutubxonachi", badge: "Administrator" }
-};
+// ================= API KONFIGURATSIYA =================
+const API_BASE = "http://127.0.0.1:8000/api";
 
-const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
-
-const defaultBooks = [
-  { id: 1, title: "Data Structures and Algorithms", author: "Thomas H. Cormen", category: "IT / Dasturlash", location: "Zal: 1 | Javon: A | Tokcha: 3", available: true },
-  { id: 2, title: "Discrete Mathematics and Its Applications", author: "Kenneth H. Rosen", category: "Matematika", location: "Zal: 1 | Javon: B | Tokcha: 2", available: true },
-  { id: 3, title: "Clean Code", author: "Robert C. Martin", category: "Software Engineering", location: "Zal: 2 | Javon: C | Tokcha: 1", available: true },
-  { id: 4, title: "C++ Primer (5th Edition)", author: "Stanley B. Lippman", category: "IT / Dasturlash", location: "Zal: 1 | Javon: A | Tokcha: 5", available: false },
-  { id: 5, title: "Computer Organization and Design", author: "David A. Patterson", category: "Arxitektura", location: "Zal: 2 | Javon: D | Tokcha: 4", available: true },
-  { id: 6, title: "Calculus: Early Transcendentals", author: "James Stewart", category: "Matematika", location: "Zal: 1 | Javon: B | Tokcha: 1", available: true }
-];
-
-// State
+// State (Holatlar)
 let currentUser = JSON.parse(localStorage.getItem("kitobbor_session")) || null;
-let books = JSON.parse(localStorage.getItem("kitobbor_books")) || defaultBooks;
-let reservations = JSON.parse(localStorage.getItem("kitobbor_reservations")) || {};
+let books = [];
 let queues = JSON.parse(localStorage.getItem("kitobbor_queues")) || {};
 let logs = JSON.parse(localStorage.getItem("kitobbor_logs")) || [
-  { time: "14:20", text: "Tizim ishga tushdi. Arduino RFID-RC522 tayyor." }
+  { time: new Date().toTimeString().slice(0, 5), text: "FastAPI + PostgreSQL tizimiga ulandi." }
 ];
 
 let currentTab = "catalog";
 let selectedCategory = "Barchasi";
 
 // ================= AUTH (LOGIN / GUEST / LOGOUT) =================
-function applySessionUI() {
+async function performLogin(username, password) {
+  try {
+    const res = await fetch(`${API_BASE}/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password })
+    });
+
+    if (!res.ok) return null;
+
+    const user = await res.json();
+    currentUser = {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      name: user.full_name,
+      badge: user.role === "admin" ? "Administrator" : (user.nfc_uid ? `NFC: ${user.nfc_uid}` : "Talaba")
+    };
+    localStorage.setItem("kitobbor_session", JSON.stringify(currentUser));
+    return currentUser;
+  } catch (err) {
+    showToast("❌ Serverga ulanib bo'lmadi (FastAPI yoniqmi?)");
+    return null;
+  }
+}
+
+document.getElementById("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const username = document.getElementById("loginUsername").value.trim().toLowerCase();
+  const password = document.getElementById("loginPassword").value;
+  const errEl = document.getElementById("loginError");
+
+  const user = await performLogin(username, password);
+  if (user) {
+    errEl.classList.add("hidden");
+    e.target.reset();
+    await applySessionUI();
+    showToast(`Xush kelibsiz, ${user.name}!`);
+  } else {
+    errEl.classList.remove("hidden");
+  }
+});
+
+async function enterAsGuest() {
+  currentUser = {
+    id: null,
+    username: "guest",
+    role: "guest",
+    name: "Mehmon",
+    badge: "Parolsiz ko'rish"
+  };
+  localStorage.setItem("kitobbor_session", JSON.stringify(currentUser));
+  await applySessionUI();
+  showToast("👤 Mehmon rejimida kirdingiz!");
+}
+
+async function quickLogin(roleKey) {
+  const creds = roleKey === "admin" ? ["admin", "admin123"] : ["user", "1234"];
+  const user = await performLogin(creds[0], creds[1]);
+  if (user) {
+    await applySessionUI();
+    showToast(`Xush kelibsiz, ${user.name}!`);
+  }
+}
+
+function logout() {
+  localStorage.removeItem("kitobbor_session");
+  currentUser = null;
+  applySessionUI();
+  showToast("Tizimdan chiqdingiz.");
+}
+
+async function applySessionUI() {
   const loginView = document.getElementById("loginView");
   const appView = document.getElementById("appView");
 
@@ -44,78 +101,137 @@ function applySessionUI() {
   document.getElementById("userDisplayName").textContent = currentUser.name;
   document.getElementById("userRoleBadge").textContent = currentUser.badge;
 
-  // Rolga qarab tab'larni ko'rsatish / yashirish
   const role = currentUser.role;
   document.getElementById("tabReserved").classList.toggle("hidden", role !== "user");
   document.getElementById("tabAdmin").classList.toggle("hidden", role !== "admin");
 
-  renderCategoryChips();
-  updateBadgesAndStats();
-
+  await fetchBooks();
   switchTab(role === "admin" ? "admin" : "catalog");
 }
 
-document.getElementById("loginForm").addEventListener("submit", (e) => {
-  e.preventDefault();
-  const username = document.getElementById("loginUsername").value.trim().toLowerCase();
-  const password = document.getElementById("loginPassword").value;
-  const errEl = document.getElementById("loginError");
+// ================= BACKEND BILAN ALOQA (API) =================
+async function fetchBooks() {
+  try {
+    const res = await fetch(`${API_BASE}/books`);
+    if (!res.ok) throw new Error("Server xatosi");
+    books = await res.json();
+    renderCategoryChips();
+    updateBadgesAndStats();
+    renderBooks();
+  } catch (err) {
+    showToast("❌ Kitoblarni bazadan yuklab bo'lmadi!");
+    console.error(err);
+  }
+}
 
-  const acc = ACCOUNTS[username];
-  if (acc && acc.password === password) {
-    currentUser = { username, ...acc };
-    localStorage.setItem("kitobbor_session", JSON.stringify(currentUser));
-    errEl.classList.add("hidden");
+async function reserveBook(bookId) {
+  if (currentUser?.role !== "user") return;
+  try {
+    const res = await fetch(`${API_BASE}/reserve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: currentUser.id, book_id: bookId })
+    });
+    if (!res.ok) throw new Error();
+    const book = books.find((b) => b.id === bookId);
+    addLog(`${currentUser.name} "${book?.title}" kitobini 2 soatga bron qildi.`);
+    showToast("✅ Kitob 2 soatga bron qilindi!");
+    await fetchBooks();
+  } catch {
+    showToast("❌ Bron qilishda xatolik yuz berdi.");
+  }
+}
+
+async function cancelReservation(bookId) {
+  try {
+    const res = await fetch(`${API_BASE}/reserve/${bookId}`, { method: "DELETE" });
+    if (!res.ok) throw new Error();
+    const book = books.find((b) => b.id === bookId);
+    addLog(`"${book?.title}" broni bekor qilindi.`);
+    showToast("❌ Bron bekor qilindi.");
+    await fetchBooks();
+  } catch {
+    showToast("❌ Bekor qilishda xatolik.");
+  }
+}
+
+async function confirmNfcPickup(bookId) {
+  try {
+    const res = await fetch(`${API_BASE}/nfc/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: currentUser.id, book_id: bookId })
+    });
+    if (!res.ok) throw new Error();
+    const book = books.find((b) => b.id === bookId);
+    addLog(`📡 NFC TASDIQLANDI: "${book?.title}" ${currentUser.name} ga berildi.`);
+    showToast("📡 NFC orqali kitob muvaffaqiyatli topshirildi!");
+    await fetchBooks();
+  } catch {
+    showToast("❌ NFC tasdiqlashda xatolik.");
+  }
+}
+
+async function toggleBookAvailability(bookId) {
+  if (currentUser?.role !== "admin") return;
+  try {
+    const res = await fetch(`${API_BASE}/books/${bookId}/toggle`, { method: "PATCH" });
+    if (!res.ok) throw new Error();
+    const updated = await res.json();
+    addLog(`Admin "${updated.title}" holatini "${updated.available ? "Mavjud" : "Band"}" qildi.`);
+    showToast("🔄 Kitob holati yangilandi.");
+    await fetchBooks();
+  } catch {
+    showToast("❌ Holatni o'zgartirishda xatolik.");
+  }
+}
+
+document.getElementById("addBookForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const payload = {
+    title: document.getElementById("newTitle").value.trim(),
+    author: document.getElementById("newAuthor").value.trim(),
+    category: document.getElementById("newCategory").value.trim(),
+    location: `Zal: ${document.getElementById("newHall").value.trim()} | Javon: ${document.getElementById("newRack").value.trim()} | Tokcha: ${document.getElementById("newShelf").value.trim()}`
+  };
+
+  try {
+    const res = await fetch(`${API_BASE}/books`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error();
+    addLog(`Admin yangi kitob qo'shdi: "${payload.title}"`);
     e.target.reset();
-    applySessionUI();
-    showToast(`Xush kelibsiz, ${currentUser.name}!`);
-  } else {
-    errEl.classList.remove("hidden");
+    showToast("✅ Yangi kitob PostgreSQL bazasiga qo'shildi!");
+    await fetchBooks();
+  } catch {
+    showToast("❌ Kitob qo'shishda xatolik yuz berdi.");
   }
 });
 
-function enterAsGuest() {
-  currentUser = {
-    username: "guest",
-    role: "guest",
-    name: "Mehmon",
-    badge: "Parolsiz ko'rish"
-  };
-  localStorage.setItem("kitobbor_session", JSON.stringify(currentUser));
-  applySessionUI();
-  showToast("👤 Mehmon rejimida kirdingiz!");
-}
-
-function quickLogin(roleKey) {
-  const acc = ACCOUNTS[roleKey];
-  if (!acc) return;
-  currentUser = { username: roleKey, ...acc };
-  localStorage.setItem("kitobbor_session", JSON.stringify(currentUser));
-  applySessionUI();
-  showToast(`Xush kelibsiz, ${currentUser.name}!`);
-}
-
-function logout() {
-  localStorage.removeItem("kitobbor_session");
-  currentUser = null;
-  applySessionUI();
-  showToast("Tizimdan chiqdingiz.");
-}
-
-// ================= SAQLASH VA YORDAMCHILAR =================
-function saveState() {
-  localStorage.setItem("kitobbor_books", JSON.stringify(books));
-  localStorage.setItem("kitobbor_reservations", JSON.stringify(reservations));
+// ================= YORDAMCHI FUNKSIYALAR =================
+function toggleQueue(bookId) {
+  if (currentUser?.role !== "user") return;
+  const book = books.find((b) => b.id === bookId);
+  if (queues[bookId]) {
+    delete queues[bookId];
+    showToast("Navbatdan chiqdingiz.");
+  } else {
+    queues[bookId] = true;
+    if (book) addLog(`${currentUser.name} "${book.title}" uchun navbatga yozildi.`);
+    showToast("🔔 Elektron navbatga yozildingiz!");
+  }
   localStorage.setItem("kitobbor_queues", JSON.stringify(queues));
-  localStorage.setItem("kitobbor_logs", JSON.stringify(logs));
-  updateBadgesAndStats();
+  renderBooks();
 }
 
 function addLog(text) {
   const time = new Date().toTimeString().slice(0, 5);
   logs.unshift({ time, text });
   if (logs.length > 20) logs.pop();
-  saveState();
+  localStorage.setItem("kitobbor_logs", JSON.stringify(logs));
   renderAdminLogs();
 }
 
@@ -135,77 +251,7 @@ function formatTimeLeft(ms) {
   return `${h}:${m}:${s}`;
 }
 
-function cleanupExpired() {
-  const now = Date.now();
-  let changed = false;
-  for (const id in reservations) {
-    if (reservations[id] <= now) {
-      delete reservations[id];
-      changed = true;
-    }
-  }
-  if (changed) saveState();
-}
-
-// ================= AMALLAR =================
-function reserveBook(bookId) {
-  if (currentUser?.role !== "user") return;
-  const book = books.find((b) => b.id === bookId);
-  if (!book) return;
-  reservations[bookId] = Date.now() + TWO_HOURS_MS;
-  saveState();
-  addLog(`${currentUser.name} "${book.title}" kitobini 2 soatga bron qildi.`);
-  renderBooks();
-  showToast("✅ Kitob 2 soatga bron qilindi!");
-}
-
-function cancelReservation(bookId) {
-  const book = books.find((b) => b.id === bookId);
-  delete reservations[bookId];
-  saveState();
-  if (book) addLog(`"${book.title}" broni bekor qilindi.`);
-  renderBooks();
-  showToast("❌ Bron bekor qilindi.");
-}
-
-function confirmNfcPickup(bookId) {
-  const book = books.find((b) => b.id === bookId);
-  if (!book) return;
-  delete reservations[bookId];
-  book.available = false;
-  saveState();
-  addLog(`📡 NFC TASDIQLANDI: "${book.title}" ${currentUser.name} ga berildi.`);
-  renderBooks();
-  showToast("📡 NFC orqali kitob muvaffaqiyatli topshirildi!");
-}
-
-function toggleQueue(bookId) {
-  if (currentUser?.role !== "user") return;
-  const book = books.find((b) => b.id === bookId);
-  if (queues[bookId]) {
-    delete queues[bookId];
-    showToast("Navbatdan chiqdingiz.");
-  } else {
-    queues[bookId] = true;
-    if (book) addLog(`${currentUser.name} "${book.title}" uchun navbatga yozildi.`);
-    showToast("🔔 Elektron navbatga yozildingiz!");
-  }
-  saveState();
-  renderBooks();
-}
-
-function toggleBookAvailability(bookId) {
-  if (currentUser?.role !== "admin") return;
-  const book = books.find((b) => b.id === bookId);
-  if (!book) return;
-  book.available = !book.available;
-  if (book.available) delete reservations[bookId];
-  saveState();
-  addLog(`Admin "${book.title}" holatini "${book.available ? "Mavjud" : "Band"}" qildi.`);
-  renderBooks();
-}
-
-// ================= NAVIGATSIYA =================
+// ================= NAVIGATSIYA VA RENDER =================
 function switchTab(tab) {
   currentTab = tab;
   ["catalog", "reserved", "library", "admin"].forEach((t) => {
@@ -239,13 +285,14 @@ function renderCategoryChips() {
     .join("");
 }
 
-// ================= RENDERING =================
 function updateBadgesAndStats() {
-  const resCount = Object.keys(reservations).length;
-  document.getElementById("reservedCount").textContent = resCount;
+  const myReservedCount = books.filter((b) => b.reserved_by && b.reserved_by === currentUser?.id).length;
+  const totalActiveReserved = books.filter((b) => Boolean(b.reserved_by)).length;
+
+  document.getElementById("reservedCount").textContent = myReservedCount;
   document.getElementById("statTotal").textContent = books.length;
-  document.getElementById("statAvailable").textContent = books.filter((b) => b.available && !reservations[b.id]).length;
-  document.getElementById("statReserved").textContent = resCount;
+  document.getElementById("statAvailable").textContent = books.filter((b) => b.available && !b.reserved_by).length;
+  document.getElementById("statReserved").textContent = totalActiveReserved;
 }
 
 function renderAdminLogs() {
@@ -256,7 +303,6 @@ function renderAdminLogs() {
 }
 
 function renderBooks() {
-  cleanupExpired();
   const query = document.getElementById("searchInput").value.toLowerCase().trim();
   const statusVal = document.getElementById("statusFilter").value;
   const grid = document.getElementById("booksGrid");
@@ -264,8 +310,10 @@ function renderBooks() {
   const role = currentUser?.role || "guest";
 
   const filtered = books.filter((book) => {
-    const isReserved = Boolean(reservations[book.id]);
+    const isReserved = Boolean(book.reserved_by);
+    const isReservedByMe = isReserved && book.reserved_by === currentUser?.id;
     const isQueued = Boolean(queues[book.id]);
+
     const matchesSearch =
       book.title.toLowerCase().includes(query) ||
       book.author.toLowerCase().includes(query) ||
@@ -276,7 +324,7 @@ function renderBooks() {
       (statusVal === "available" && book.available && !isReserved) ||
       (statusVal === "busy" && (!book.available || isReserved));
 
-    if (currentTab === "reserved") return matchesSearch && (isReserved || isQueued);
+    if (currentTab === "reserved") return matchesSearch && (isReservedByMe || isQueued);
     return matchesSearch && matchesCategory && matchesStatus;
   });
 
@@ -288,15 +336,16 @@ function renderBooks() {
   emptyState.classList.add("hidden");
 
   filtered.forEach((book) => {
-    const expireTime = reservations[book.id];
-    const isReservedByMe = Boolean(expireTime);
+    const isReserved = Boolean(book.reserved_by);
+    const isReservedByMe = isReserved && book.reserved_by === currentUser?.id;
     const isQueuedByMe = Boolean(queues[book.id]);
+    const expireMs = book.expires_at ? new Date(book.expires_at).getTime() : 0;
 
     let statusBadge = `<span class="text-xs font-semibold text-emerald-600">● Mavjud</span>`;
     let actionHTML = "";
 
     if (role === "guest") {
-      if (!book.available || isReservedByMe) {
+      if (!book.available || isReserved) {
         statusBadge = `<span class="text-xs font-semibold text-amber-600">● Band</span>`;
       }
       actionHTML = `
@@ -305,7 +354,7 @@ function renderBooks() {
         </button>
       `;
     } else if (role === "admin") {
-      if (!book.available || isReservedByMe) {
+      if (!book.available || isReserved) {
         statusBadge = `<span class="text-xs font-semibold text-amber-600">● Band</span>`;
       }
       actionHTML = `
@@ -319,7 +368,7 @@ function renderBooks() {
         actionHTML = `
           <div class="mt-4 space-y-2">
             <div class="w-full py-2 px-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-center text-sm font-semibold">
-              ⏳ <span data-timer-id="${book.id}">${formatTimeLeft(expireTime - Date.now())}</span>
+              ⏳ <span data-expire-ms="${expireMs}">${formatTimeLeft(expireMs - Date.now())}</span>
             </div>
             <div class="grid grid-cols-2 gap-2">
               <button onclick="confirmNfcPickup(${book.id})" class="py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium transition">📡 NFC Olish</button>
@@ -327,8 +376,8 @@ function renderBooks() {
             </div>
           </div>
         `;
-      } else if (!book.available) {
-        statusBadge = `<span class="text-xs font-semibold text-amber-600">● Qo'lda (Band)</span>`;
+      } else if (!book.available || isReserved) {
+        statusBadge = `<span class="text-xs font-semibold text-amber-600">● Band</span>`;
         actionHTML = `
           <button onclick="toggleQueue(${book.id})" class="mt-4 w-full py-2.5 rounded-xl ${isQueuedByMe ? "bg-amber-100 text-amber-800 border border-amber-300" : "bg-slate-100 hover:bg-slate-200 text-slate-700"} text-sm font-medium transition">
             ${isQueuedByMe ? "🔔 Navbatdasiz (Bekor qilish)" : "Navbatga yozilish"}
@@ -363,37 +412,19 @@ function renderBooks() {
   });
 }
 
-// Yangi kitob qo'shish (Admin)
-document.getElementById("addBookForm").addEventListener("submit", (e) => {
-  e.preventDefault();
-  const newBook = {
-    id: Date.now(),
-    title: document.getElementById("newTitle").value.trim(),
-    author: document.getElementById("newAuthor").value.trim(),
-    category: document.getElementById("newCategory").value.trim(),
-    location: `Zal: ${document.getElementById("newHall").value.trim()} | Javon: ${document.getElementById("newRack").value.trim()} | Tokcha: ${document.getElementById("newShelf").value.trim()}`,
-    available: true
-  };
-  books.unshift(newBook);
-  saveState();
-  addLog(`Admin yangi kitob qo'shdi: "${newBook.title}"`);
-  e.target.reset();
-  renderCategoryChips();
-  showToast("✅ Yangi kitob katalogga qo'shildi!");
-});
-
+// Har soniyada taymerlarni yangilash
 setInterval(() => {
   if (!currentUser) return;
-  const spans = document.querySelectorAll("[data-timer-id]");
+  const spans = document.querySelectorAll("[data-expire-ms]");
   const now = Date.now();
   let expired = false;
   spans.forEach((span) => {
-    const id = span.getAttribute("data-timer-id");
-    const left = (reservations[id] || 0) - now;
+    const expireMs = Number(span.getAttribute("data-expire-ms"));
+    const left = expireMs - now;
     if (left <= 0) expired = true;
     else span.textContent = formatTimeLeft(left);
   });
-  if (expired) renderBooks();
+  if (expired) fetchBooks();
 }, 1000);
 
 document.getElementById("searchInput").addEventListener("input", renderBooks);
