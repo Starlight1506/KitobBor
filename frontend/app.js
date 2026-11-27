@@ -3,14 +3,24 @@ const API_BASE = "http://127.0.0.1:8000/api";
 
 // State (Holatlar)
 let currentUser = JSON.parse(localStorage.getItem("kitobbor_session")) || null;
+let accessToken = localStorage.getItem("kitobbor_token") || null;
 let books = [];
 let queues = JSON.parse(localStorage.getItem("kitobbor_queues")) || {};
 let logs = JSON.parse(localStorage.getItem("kitobbor_logs")) || [
-  { time: new Date().toTimeString().slice(0, 5), text: "FastAPI + PostgreSQL tizimiga ulandi." }
+  { time: new Date().toTimeString().slice(0, 5), text: "FastAPI (JWT) + PostgreSQL tizimiga ulandi." }
 ];
 
 let currentTab = "catalog";
 let selectedCategory = "Barchasi";
+
+// Himoyalangan so'rovlar uchun JWT header yordamchisi
+function authHeaders() {
+  const headers = { "Content-Type": "application/json" };
+  if (accessToken) {
+    headers["Authorization"] = `Bearer ${accessToken}`;
+  }
+  return headers;
+}
 
 // ================= AUTH (LOGIN / GUEST / LOGOUT) =================
 async function performLogin(username, password) {
@@ -23,7 +33,10 @@ async function performLogin(username, password) {
 
     if (!res.ok) return null;
 
-    const user = await res.json();
+    const data = await res.json();
+    accessToken = data.access_token;
+    const user = data.user;
+
     currentUser = {
       id: user.id,
       username: user.username,
@@ -31,6 +44,8 @@ async function performLogin(username, password) {
       name: user.full_name,
       badge: user.role === "admin" ? "Administrator" : (user.nfc_uid ? `NFC: ${user.nfc_uid}` : "Talaba")
     };
+
+    localStorage.setItem("kitobbor_token", accessToken);
     localStorage.setItem("kitobbor_session", JSON.stringify(currentUser));
     return currentUser;
   } catch (err) {
@@ -57,6 +72,8 @@ document.getElementById("loginForm").addEventListener("submit", async (e) => {
 });
 
 async function enterAsGuest() {
+  accessToken = null;
+  localStorage.removeItem("kitobbor_token");
   currentUser = {
     id: null,
     username: "guest",
@@ -80,7 +97,9 @@ async function quickLogin(roleKey) {
 
 function logout() {
   localStorage.removeItem("kitobbor_session");
+  localStorage.removeItem("kitobbor_token");
   currentUser = null;
+  accessToken = null;
   applySessionUI();
   showToast("Tizimdan chiqdingiz.");
 }
@@ -109,7 +128,7 @@ async function applySessionUI() {
   switchTab(role === "admin" ? "admin" : "catalog");
 }
 
-// ================= BACKEND BILAN ALOQA (API) =================
+// ================= BACKEND BILAN ALOQA (JWT API) =================
 async function fetchBooks() {
   try {
     const res = await fetch(`${API_BASE}/books`);
@@ -129,10 +148,12 @@ async function reserveBook(bookId) {
   try {
     const res = await fetch(`${API_BASE}/reserve`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: currentUser.id, book_id: bookId })
+      headers: authHeaders(),
+      body: JSON.stringify({ book_id: bookId })
     });
+    if (res.status === 401) return logout();
     if (!res.ok) throw new Error();
+
     const book = books.find((b) => b.id === bookId);
     addLog(`${currentUser.name} "${book?.title}" kitobini 2 soatga bron qildi.`);
     showToast("✅ Kitob 2 soatga bron qilindi!");
@@ -144,8 +165,13 @@ async function reserveBook(bookId) {
 
 async function cancelReservation(bookId) {
   try {
-    const res = await fetch(`${API_BASE}/reserve/${bookId}`, { method: "DELETE" });
+    const res = await fetch(`${API_BASE}/reserve/${bookId}`, {
+      method: "DELETE",
+      headers: authHeaders()
+    });
+    if (res.status === 401) return logout();
     if (!res.ok) throw new Error();
+
     const book = books.find((b) => b.id === bookId);
     addLog(`"${book?.title}" broni bekor qilindi.`);
     showToast("❌ Bron bekor qilindi.");
@@ -159,10 +185,12 @@ async function confirmNfcPickup(bookId) {
   try {
     const res = await fetch(`${API_BASE}/nfc/confirm`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: currentUser.id, book_id: bookId })
+      headers: authHeaders(),
+      body: JSON.stringify({ book_id: bookId })
     });
+    if (res.status === 401) return logout();
     if (!res.ok) throw new Error();
+
     const book = books.find((b) => b.id === bookId);
     addLog(`📡 NFC TASDIQLANDI: "${book?.title}" ${currentUser.name} ga berildi.`);
     showToast("📡 NFC orqali kitob muvaffaqiyatli topshirildi!");
@@ -175,8 +203,13 @@ async function confirmNfcPickup(bookId) {
 async function toggleBookAvailability(bookId) {
   if (currentUser?.role !== "admin") return;
   try {
-    const res = await fetch(`${API_BASE}/books/${bookId}/toggle`, { method: "PATCH" });
+    const res = await fetch(`${API_BASE}/books/${bookId}/toggle`, {
+      method: "PATCH",
+      headers: authHeaders()
+    });
+    if (res.status === 401 || res.status === 403) return logout();
     if (!res.ok) throw new Error();
+
     const updated = await res.json();
     addLog(`Admin "${updated.title}" holatini "${updated.available ? "Mavjud" : "Band"}" qildi.`);
     showToast("🔄 Kitob holati yangilandi.");
@@ -198,10 +231,12 @@ document.getElementById("addBookForm").addEventListener("submit", async (e) => {
   try {
     const res = await fetch(`${API_BASE}/books`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders(),
       body: JSON.stringify(payload)
     });
+    if (res.status === 401 || res.status === 403) return logout();
     if (!res.ok) throw new Error();
+
     addLog(`Admin yangi kitob qo'shdi: "${payload.title}"`);
     e.target.reset();
     showToast("✅ Yangi kitob PostgreSQL bazasiga qo'shildi!");

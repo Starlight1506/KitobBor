@@ -1,12 +1,17 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 from backend.database import get_db_connection
+from backend.security import (
+    verify_password,
+    create_access_token,
+    get_current_user,
+    require_admin
+)
 
-app = FastAPI(title="KitobBor API", version="1.0")
+app = FastAPI(title="KitobBor API", version="2.0")
 
-# Frontend (5500-port) backend (8000-port) bilan bemalol gaplashishi uchun CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,7 +20,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ================= PYDANTIC MODELLAR (So'rov shablonlari) =================
+# ================= PYDANTIC MODELLAR =================
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -27,32 +32,47 @@ class BookCreateRequest(BaseModel):
     location: str = "Zal: 1 | Javon: A | Tokcha: 1"
 
 class ReserveRequest(BaseModel):
-    user_id: int
     book_id: int
 
-# ================= 1. AUTH (LOGIN) =================
+# ================= 1. AUTH (LOGIN + JWT) =================
 @app.post("/api/login")
 def login(data: LoginRequest):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
-        "SELECT id, username, role, full_name, nfc_uid FROM users WHERE username = %s AND password = %s",
-        (data.username.strip().lower(), data.password)
+        "SELECT id, username, password, role, full_name, nfc_uid FROM users WHERE username = %s",
+        (data.username.strip().lower(),)
     )
     user = cur.fetchone()
     cur.close()
     conn.close()
 
-    if not user:
+    if not user or not verify_password(data.password, user["password"]):
         raise HTTPException(status_code=401, detail="Login yoki parol noto'g'ri")
-    return user
+
+    token = create_access_token({
+        "sub": str(user["id"]),
+        "username": user["username"],
+        "role": user["role"]
+    })
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "id": user["id"],
+            "username": user["username"],
+            "role": user["role"],
+            "full_name": user["full_name"],
+            "nfc_uid": user["nfc_uid"]
+        }
+    }
 
 # ================= 2. KITOBLAR (KATALOG VA ADMIN) =================
 @app.get("/api/books")
 def get_books():
     conn = get_db_connection()
     cur = conn.cursor()
-    # Muddati o'tib ketgan bronlarni avtomatik yopish
     cur.execute("UPDATE reservations SET status = 'expired' WHERE status = 'active' AND expires_at < NOW()")
     cur.execute("""
         SELECT b.*, r.expires_at, r.user_id AS reserved_by
@@ -67,7 +87,7 @@ def get_books():
     return books
 
 @app.post("/api/books")
-def add_book(data: BookCreateRequest):
+def add_book(data: BookCreateRequest, admin: dict = Depends(require_admin)):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
@@ -85,7 +105,7 @@ def add_book(data: BookCreateRequest):
     return new_book
 
 @app.patch("/api/books/{book_id}/toggle")
-def toggle_book_status(book_id: int):
+def toggle_book_status(book_id: int, admin: dict = Depends(require_admin)):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("SELECT available FROM books WHERE id = %s", (book_id,))
@@ -99,7 +119,6 @@ def toggle_book_status(book_id: int):
     cur.execute("UPDATE books SET available = %s WHERE id = %s RETURNING *", (new_status, book_id))
     updated = cur.fetchone()
 
-    # Agar kitob qayta mavjud qilinsa, aktiv bronni yopamiz
     if new_status:
         cur.execute("UPDATE reservations SET status = 'cancelled' WHERE book_id = %s AND status = 'active'", (book_id,))
 
@@ -110,7 +129,8 @@ def toggle_book_status(book_id: int):
 
 # ================= 3. BRON QILISH VA NFC TASDIQLASH =================
 @app.post("/api/reserve")
-def reserve_book(data: ReserveRequest):
+def reserve_book(data: ReserveRequest, current_user: dict = Depends(get_current_user)):
+    user_id = int(current_user["sub"])
     conn = get_db_connection()
     cur = conn.cursor()
     expires = datetime.now() + timedelta(hours=2)
@@ -120,7 +140,7 @@ def reserve_book(data: ReserveRequest):
         VALUES (%s, %s, %s, 'active')
         RETURNING id, user_id, book_id, expires_at
         """,
-        (data.user_id, data.book_id, expires)
+        (user_id, data.book_id, expires)
     )
     res = cur.fetchone()
     conn.commit()
@@ -129,7 +149,7 @@ def reserve_book(data: ReserveRequest):
     return {"message": "Kitob 2 soatga bron qilindi", "reservation": res}
 
 @app.delete("/api/reserve/{book_id}")
-def cancel_reservation(book_id: int):
+def cancel_reservation(book_id: int, current_user: dict = Depends(get_current_user)):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
@@ -142,7 +162,7 @@ def cancel_reservation(book_id: int):
     return {"message": "Bron bekor qilindi"}
 
 @app.post("/api/nfc/confirm")
-def confirm_nfc_pickup(data: ReserveRequest):
+def confirm_nfc_pickup(data: ReserveRequest, current_user: dict = Depends(get_current_user)):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
